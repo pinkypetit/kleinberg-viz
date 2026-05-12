@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kleinberg's Small-World — Greedy Decentralized Algorithm</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Open Sans', sans-serif;
+    background: #B6C9DE;
+    color: #2f4c6d;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 2px; text-align: center; }
+  .subtitle { font-size: 13px; color: #3a5a7a; margin-bottom: 18px; text-align: center; }
+
+  .main-layout {
+    display: flex;
+    gap: 20px;
+    max-width: 1200px;
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .canvas-wrap {
+    background: #fff;
+    border-radius: 10px;
+    padding: 12px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  canvas { display: block; cursor: crosshair; }
+
+  .panel {
+    flex: 1;
+    min-width: 290px;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .card-dark {
+    background: #2f4c6d;
+    color: #fff;
+    border-radius: 10px;
+    padding: 14px 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  }
+
+  .card h2, .card-dark h2 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+  .card-dark h2 { color: #B6C9DE; }
+
+  .param-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .param-row label {
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 72px;
+  }
+  .param-row input[type=range] {
+    flex: 1;
+    accent-color: #2f4c6d;
+    height: 6px;
+  }
+  .param-row .val {
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 32px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  button {
+    font-family: 'Open Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { opacity: 0.85; transform: translateY(-1px); }
+  button:active { transform: scale(0.97) translateY(0); }
+
+  .btn-dark { background: #2f4c6d; color: #fff; }
+  .btn-outline { background: transparent; color: #2f4c6d; border: 2px solid #2f4c6d; }
+  .btn-accent { background: #2a7abf; color: #fff; }
+  .btn-danger { background: #d63031; color: #fff; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .stat-box {
+    text-align: center;
+    padding: 8px 4px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+  }
+  .stat-val {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+    color: #B6C9DE;
+  }
+
+  .legend { font-size: 11px; line-height: 1.9; }
+  .legend-dot {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .info-text {
+    font-size: 11px;
+    color: #8aa0b8;
+    line-height: 1.4;
+    margin-top: 6px;
+  }
+
+  .status-bar {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 0;
+    min-height: 22px;
+    transition: color 0.2s;
+  }
+  .status-bar.running { color: #2a7abf; }
+  .status-bar.done { color: #1a8a4a; }
+  .status-bar.idle { color: #666; }
+</style>
+</head>
+<body>
+
+<h1>Kleinberg's Greedy Decentralized Algorithm</h1>
+<p class="subtitle">The Small-World Phenomenon: An Algorithmic Perspective (Kleinberg, 1999)</p>
+
+<div class="main-layout">
+  <div class="canvas-wrap">
+    <canvas id="grid" width="640" height="640"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <h2>Parametros del modelo</h2>
+      <div class="param-row">
+        <label>n (grilla)</label>
+        <input type="range" id="sl-n" min="5" max="30" value="15">
+        <span class="val" id="val-n">15</span>
+      </div>
+      <div class="param-row">
+        <label>p (local)</label>
+        <input type="range" id="sl-p" min="1" max="3" value="1">
+        <span class="val" id="val-p">1</span>
+      </div>
+      <div class="param-row">
+        <label>q (largo alc.)</label>
+        <input type="range" id="sl-q" min="1" max="5" value="1">
+        <span class="val" id="val-q">1</span>
+      </div>
+      <div class="param-row">
+        <label>r (exponente)</label>
+        <input type="range" id="sl-r" min="0" max="50" value="20" step="1">
+        <span class="val" id="val-r">2.0</span>
+      </div>
+      <div class="param-row">
+        <label>Velocidad</label>
+        <input type="range" id="sl-speed" min="1" max="20" value="6">
+        <span class="val" id="val-speed">6</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Controles</h2>
+      <div class="btn-row">
+        <button class="btn-dark" id="btn-gen">Nueva red</button>
+        <button class="btn-accent" id="btn-play">&#9654; Iniciar</button>
+        <button class="btn-outline" id="btn-step">Paso</button>
+        <button class="btn-outline" id="btn-reset">Reiniciar</button>
+      </div>
+      <div class="status-bar idle" id="status">Presiona "Nueva red" para comenzar.</div>
+    </div>
+
+    <div class="card-dark">
+      <h2>Estado del algoritmo</h2>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-val" id="st-steps">0</div>
+          <div class="stat-label">Pasos</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="st-dist">&mdash;</div>
+          <div class="stat-label">d(actual, t)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="st-phase">&mdash;</div>
+          <div class="stat-label">Fase j</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="st-type">&mdash;</div>
+          <div class="stat-label">Ultimo enlace</div>
+        </div>
+      </div>
+      <p class="info-text">
+        Algoritmo greedy (Thm 2): en cada paso, el nodo actual reenv&iacute;a el mensaje
+        al contacto (local o de largo alcance) m&aacute;s cercano al destino t en distancia Manhattan.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Leyenda</h2>
+      <div class="legend">
+        <span class="legend-dot" style="background:#2a7abf"></span> Origen s<br>
+        <span class="legend-dot" style="background:#d63031"></span> Destino t<br>
+        <span class="legend-dot" style="background:#2f4c6d"></span> Nodo actual u<br>
+        <span class="legend-dot" style="background:#fdcb6e;border:1.5px solid #e17055"></span> Camino recorrido<br>
+        <span class="legend-dot" style="background:rgba(0,0,0,0.12)"></span> Contactos locales (dist &le; p)<br>
+        <span class="legend-dot" style="background:#e17055"></span> Contactos largo alcance<br>
+        <span class="legend-dot" style="background:rgba(100,120,140,0.15)"></span> Caminos no tomados (se desvanecen)<br>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+
+const slN = document.getElementById('sl-n');
+const slP = document.getElementById('sl-p');
+const slQ = document.getElementById('sl-q');
+const slR = document.getElementById('sl-r');
+const slSpeed = document.getElementById('sl-speed');
+
+const valN = document.getElementById('val-n');
+const valP = document.getElementById('val-p');
+const valQ = document.getElementById('val-q');
+const valR = document.getElementById('val-r');
+const valSpeed = document.getElementById('val-speed');
+
+const btnGen = document.getElementById('btn-gen');
+const btnPlay = document.getElementById('btn-play');
+const btnStep = document.getElementById('btn-step');
+const btnReset = document.getElementById('btn-reset');
+const statusEl = document.getElementById('status');
+
+const stSteps = document.getElementById('st-steps');
+const stDist = document.getElementById('st-dist');
+const stPhase = document.getElementById('st-phase');
+const stType = document.getElementById('st-type');
+
+// --- State ---
+let N, P, Q, R;
+let longRangeContacts = {};
+let source = null, target = null;
+let current = null;
+let path = [];
+let stepCount = 0;
+let finished = false;
+let playing = false;
+let playTimer = null;
+let lastLinkType = '—';
+
+// History of contacts considered at each step (not taken)
+// Each entry: { step, from: [i,j], contacts: [{node:[i,j], type:'local'|'lr'}], chosen: [i,j] }
+let contactHistory = [];
+
+// Animation state
+let animating = false;
+let animFrom = null, animTo = null;
+let animProgress = 0;
+let animLinkType = '';
+let animRAF = null;
+
+function getParams() {
+  N = parseInt(slN.value);
+  P = parseInt(slP.value);
+  Q = parseInt(slQ.value);
+  R = parseFloat(slR.value) / 10;
+}
+
+function latticeDistance(a, b) {
+  return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+}
+
+function generateNetwork() {
+  getParams();
+  longRangeContacts = {};
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const contacts = [];
+      for (let qi = 0; qi < Q; qi++) {
+        contacts.push(sampleLongRange(i, j));
+      }
+      longRangeContacts[i + ',' + j] = contacts;
+    }
+  }
+}
+
+function sampleLongRange(si, sj) {
+  const weights = [];
+  const nodes = [];
+  let totalWeight = 0;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      if (i === si && j === sj) continue;
+      const d = Math.abs(i - si) + Math.abs(j - sj);
+      const w = (R === 0) ? 1 : Math.pow(d, -R);
+      weights.push(w);
+      nodes.push([i, j]);
+      totalWeight += w;
+    }
+  }
+  let rand = Math.random() * totalWeight;
+  for (let k = 0; k < weights.length; k++) {
+    rand -= weights[k];
+    if (rand <= 0) return nodes[k];
+  }
+  return nodes[nodes.length - 1];
+}
+
+function getLocalContacts(i, j) {
+  const contacts = [];
+  for (let di = -P; di <= P; di++) {
+    for (let dj = -P; dj <= P; dj++) {
+      if (di === 0 && dj === 0) continue;
+      if (Math.abs(di) + Math.abs(dj) > P) continue;
+      const ni = i + di, nj = j + dj;
+      if (ni >= 0 && ni < N && nj >= 0 && nj < N) {
+        contacts.push([ni, nj]);
+      }
+    }
+  }
+  return contacts;
+}
+
+// --- Greedy step (paper: choose contact closest to t in lattice distance) ---
+function greedyStep() {
+  if (finished || !current || !target) return null;
+
+  const ci = current[0], cj = current[1];
+  const local = getLocalContacts(ci, cj);
+  const lr = longRangeContacts[ci + ',' + cj] || [];
+
+  let bestDist = Infinity;
+  let bestNode = null;
+  let bestType = 'local';
+
+  for (const c of local) {
+    const d = latticeDistance(c, target);
+    if (d < bestDist) { bestDist = d; bestNode = c; bestType = 'local'; }
+  }
+  for (const c of lr) {
+    const d = latticeDistance(c, target);
+    if (d < bestDist) { bestDist = d; bestNode = c; bestType = 'largo alcance'; }
+  }
+
+  if (!bestNode) return null;
+
+  // Record all contacts considered (for ghost trail)
+  const allContacts = [];
+  for (const c of local) {
+    allContacts.push({ node: [...c], type: 'local' });
+  }
+  for (const c of lr) {
+    allContacts.push({ node: [...c], type: 'lr' });
+  }
+
+  const from = [...current];
+  current = bestNode;
+  path.push([...current]);
+  stepCount++;
+  lastLinkType = bestType;
+
+  contactHistory.push({
+    step: stepCount,
+    from: from,
+    contacts: allContacts,
+    chosen: [...current],
+  });
+
+  if (current[0] === target[0] && current[1] === target[1]) {
+    finished = true;
+  }
+
+  return { from, to: [...current], type: bestType };
+}
+
+// --- Drawing ---
+const PADDING = 36;
+
+function cellSize() {
+  return (canvas.width - 2 * PADDING) / (N - 1);
+}
+
+function nodePos(i, j) {
+  const cs = cellSize();
+  return [PADDING + j * cs, PADDING + i * cs];
+}
+
+function gridPosFromPixel(px, py) {
+  const cs = cellSize();
+  const j = Math.round((px - PADDING) / cs);
+  const i = Math.round((py - PADDING) / cs);
+  if (i >= 0 && i < N && j >= 0 && j < N) return [i, j];
+  return null;
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  const cs = cellSize();
+  const nodeR = Math.max(3, Math.min(7, cs * 0.16));
+
+  // Draw grid lines (very subtle)
+  ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < N; i++) {
+    const [x1, y1] = nodePos(i, 0);
+    const [x2, y2] = nodePos(i, N - 1);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  for (let j = 0; j < N; j++) {
+    const [x1, y1] = nodePos(0, j);
+    const [x2, y2] = nodePos(N - 1, j);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+
+  // Draw ghost trails: rejected contacts from previous steps, fading with age
+  if (contactHistory.length > 0) {
+    const maxAge = contactHistory.length;
+    for (let h = 0; h < contactHistory.length; h++) {
+      const entry = contactHistory[h];
+      const age = contactHistory.length - h; // 1 = most recent, maxAge = oldest
+      const opacity = Math.max(0.06, 0.35 * Math.pow(0.7, age - 1));
+
+      const [fx, fy] = nodePos(entry.from[0], entry.from[1]);
+
+      for (const c of entry.contacts) {
+        const isChosen = c.node[0] === entry.chosen[0] && c.node[1] === entry.chosen[1];
+        if (isChosen) continue;
+
+        const [cx, cy] = nodePos(c.node[0], c.node[1]);
+        const color = c.type === 'lr'
+          ? `rgba(225,112,85,${opacity})`
+          : `rgba(100,120,140,${opacity})`;
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        if (c.type === 'lr') ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        // Small dot at the rejected endpoint
+        ctx.beginPath();
+        ctx.arc(cx, cy, nodeR * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    }
+  }
+
+  // Determine the "display current" for animation
+  let displayCurrent = current;
+  if (animating && animFrom && animTo) {
+    displayCurrent = animTo;
+  }
+
+  // Draw local contact edges of current node (ACTIVE — more visible)
+  if (current && !finished) {
+    const local = getLocalContacts(current[0], current[1]);
+    for (const c of local) {
+      const [x1, y1] = nodePos(current[0], current[1]);
+      const [x2, y2] = nodePos(c[0], c[1]);
+
+      // Line
+      ctx.strokeStyle = 'rgba(47,76,109,0.25)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+
+      // Endpoint highlight
+      ctx.beginPath();
+      ctx.arc(x2, y2, nodeR + 1, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(47,76,109,0.12)';
+      ctx.fill();
+    }
+  }
+
+  // Draw long-range contacts of current node (ACTIVE — prominent)
+  if (current && !finished) {
+    const lr = longRangeContacts[current[0] + ',' + current[1]] || [];
+    for (const c of lr) {
+      const [x1, y1] = nodePos(current[0], current[1]);
+      const [x2, y2] = nodePos(c[0], c[1]);
+
+      // Glow behind the line
+      ctx.save();
+      ctx.strokeStyle = 'rgba(225,112,85,0.15)';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.restore();
+
+      // Dashed line
+      ctx.save();
+      ctx.strokeStyle = 'rgba(225,112,85,0.7)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Arrowhead
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const aLen = 9;
+      ctx.fillStyle = 'rgba(225,112,85,0.8)';
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - aLen * Math.cos(angle - 0.35), y2 - aLen * Math.sin(angle - 0.35));
+      ctx.lineTo(x2 - aLen * Math.cos(angle + 0.35), y2 - aLen * Math.sin(angle + 0.35));
+      ctx.closePath(); ctx.fill();
+
+      // Highlight long-range endpoint (pulsing ring)
+      ctx.beginPath();
+      ctx.arc(x2, y2, nodeR + 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(225,112,85,0.12)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x2, y2, nodeR + 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(225,112,85,0.35)';
+      ctx.fill();
+    }
+  }
+
+  // Draw path (thick golden trail)
+  if (path.length > 1) {
+    // Glow
+    ctx.save();
+    ctx.strokeStyle = 'rgba(253,203,110,0.3)';
+    ctx.lineWidth = Math.max(6, cs * 0.28);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    const [sx0, sy0] = nodePos(path[0][0], path[0][1]);
+    ctx.moveTo(sx0, sy0);
+    for (let k = 1; k < path.length; k++) {
+      const [px, py] = nodePos(path[k][0], path[k][1]);
+      // If animating the last segment, only draw up to animated position
+      if (animating && k === path.length - 1 && animFrom && animTo) {
+        const [fx, fy] = nodePos(animFrom[0], animFrom[1]);
+        const t = easeInOutCubic(animProgress);
+        ctx.lineTo(lerp(fx, px, t), lerp(fy, py, t));
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Solid line
+    ctx.strokeStyle = '#fdcb6e';
+    ctx.lineWidth = Math.max(2.5, cs * 0.1);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    const [sx, sy] = nodePos(path[0][0], path[0][1]);
+    ctx.moveTo(sx, sy);
+    for (let k = 1; k < path.length; k++) {
+      const [px, py] = nodePos(path[k][0], path[k][1]);
+      if (animating && k === path.length - 1 && animFrom && animTo) {
+        const [fx, fy] = nodePos(animFrom[0], animFrom[1]);
+        const t = easeInOutCubic(animProgress);
+        ctx.lineTo(lerp(fx, px, t), lerp(fy, py, t));
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+  }
+
+  // Draw all nodes
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const [x, y] = nodePos(i, j);
+      ctx.beginPath();
+      ctx.arc(x, y, nodeR, 0, Math.PI * 2);
+      ctx.fillStyle = '#d0d4d8';
+      ctx.fill();
+    }
+  }
+
+  // Draw visited nodes
+  for (let k = 0; k < path.length; k++) {
+    if (animating && k === path.length - 1) continue; // animated node drawn separately
+    const [x, y] = nodePos(path[k][0], path[k][1]);
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR + 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#fdcb6e';
+    ctx.fill();
+    ctx.strokeStyle = '#e17055';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  // Draw animating node
+  if (animating && animFrom && animTo) {
+    const [fx, fy] = nodePos(animFrom[0], animFrom[1]);
+    const [tx, ty] = nodePos(animTo[0], animTo[1]);
+    const t = easeInOutCubic(animProgress);
+    const ax = lerp(fx, tx, t);
+    const ay = lerp(fy, ty, t);
+
+    // Pulse ring
+    const pulse = 1 + 0.3 * Math.sin(animProgress * Math.PI);
+    ctx.beginPath();
+    ctx.arc(ax, ay, (nodeR + 4) * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = animLinkType === 'largo alcance' ? 'rgba(225,112,85,0.15)' : 'rgba(42,122,191,0.12)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(ax, ay, nodeR + 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#2f4c6d';
+    ctx.fill();
+  }
+
+  // Draw source
+  if (source) {
+    const [x, y] = nodePos(source[0], source[1]);
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR + 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#2a7abf';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(8, nodeR + 1)}px Open Sans`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('s', x, y + 0.5);
+  }
+
+  // Draw target
+  if (target) {
+    const [x, y] = nodePos(target[0], target[1]);
+    // Target glow
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR + 8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(214,48,49,0.1)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR + 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#d63031';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(8, nodeR + 1)}px Open Sans`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('t', x, y + 0.5);
+  }
+
+  // Draw current node (if not animating and not source/target)
+  if (current && !animating && !finished) {
+    const isS = source && current[0] === source[0] && current[1] === source[1];
+    const isT = target && current[0] === target[0] && current[1] === target[1];
+    if (!isS && !isT) {
+      const [x, y] = nodePos(current[0], current[1]);
+      ctx.beginPath();
+      ctx.arc(x, y, nodeR + 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#2f4c6d';
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.max(8, nodeR + 1)}px Open Sans`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('u', x, y + 0.5);
+    }
+  }
+
+  // Update stats
+  stSteps.textContent = stepCount;
+  if (current && target) {
+    const d = latticeDistance(current, target);
+    stDist.textContent = d;
+    if (d === 0) {
+      stPhase.textContent = 'fin';
+    } else {
+      stPhase.textContent = Math.floor(Math.log2(d));
+    }
+  } else {
+    stDist.textContent = '—';
+    stPhase.textContent = '—';
+  }
+  stType.textContent = lastLinkType;
+}
+
+// --- Animated step ---
+function animatedStep(callback) {
+  const result = greedyStep();
+  if (!result) { if (callback) callback(); return; }
+
+  animating = true;
+  animFrom = result.from;
+  animTo = result.to;
+  animProgress = 0;
+  animLinkType = result.type;
+
+  const duration = Math.max(80, 400 - parseInt(slSpeed.value) * 18);
+  const startTime = performance.now();
+
+  function tick(now) {
+    const elapsed = now - startTime;
+    animProgress = Math.min(1, elapsed / duration);
+    draw();
+    if (animProgress < 1) {
+      animRAF = requestAnimationFrame(tick);
+    } else {
+      animating = false;
+      animFrom = null;
+      animTo = null;
+      draw();
+      if (callback) callback();
+    }
+  }
+  animRAF = requestAnimationFrame(tick);
+}
+
+// --- Controls ---
+function stopPlaying() {
+  playing = false;
+  if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+  if (animRAF) { cancelAnimationFrame(animRAF); animRAF = null; }
+  animating = false;
+  btnPlay.innerHTML = '&#9654; Iniciar';
+}
+
+function updateStatus() {
+  if (finished) {
+    statusEl.textContent = `Mensaje entregado en ${stepCount} pasos.`;
+    statusEl.className = 'status-bar done';
+  } else if (current && target) {
+    statusEl.textContent = `Paso ${stepCount}: nodo (${current[1]+1},${current[0]+1}), d=${latticeDistance(current, target)}, via ${lastLinkType}.`;
+    statusEl.className = 'status-bar running';
+  }
+}
+
+function resetAlgorithm() {
+  stopPlaying();
+  if (source) {
+    current = [...source];
+    path = [[...source]];
+  } else {
+    current = null;
+    path = [];
+  }
+  stepCount = 0;
+  finished = false;
+  lastLinkType = '—';
+  contactHistory = [];
+  statusEl.textContent = 'Algoritmo reiniciado.';
+  statusEl.className = 'status-bar idle';
+  draw();
+}
+
+function newNetwork() {
+  stopPlaying();
+  generateNetwork();
+
+  // Place source and target at good distance
+  const margin = Math.max(1, Math.floor(N * 0.1));
+  source = [
+    margin + Math.floor(Math.random() * (N - 2 * margin)),
+    margin + Math.floor(Math.random() * (N - 2 * margin))
+  ];
+  let attempts = 0;
+  do {
+    target = [
+      margin + Math.floor(Math.random() * (N - 2 * margin)),
+      margin + Math.floor(Math.random() * (N - 2 * margin))
+    ];
+    attempts++;
+  } while (latticeDistance(source, target) < Math.floor(N * 0.8) && attempts < 200);
+
+  current = [...source];
+  path = [[...source]];
+  stepCount = 0;
+  finished = false;
+  lastLinkType = '—';
+  contactHistory = [];
+
+  const d0 = latticeDistance(source, target);
+  statusEl.textContent = `Red generada (n=${N}, p=${P}, q=${Q}, r=${R.toFixed(1)}). d(s,t)=${d0}. Listo.`;
+  statusEl.className = 'status-bar idle';
+  draw();
+}
+
+slN.oninput = () => { valN.textContent = slN.value; };
+slP.oninput = () => { valP.textContent = slP.value; };
+slQ.oninput = () => { valQ.textContent = slQ.value; };
+slR.oninput = () => { valR.textContent = (parseFloat(slR.value) / 10).toFixed(1); };
+slSpeed.oninput = () => { valSpeed.textContent = slSpeed.value; };
+
+btnGen.onclick = newNetwork;
+
+btnStep.onclick = () => {
+  if (finished || !current || !target) return;
+  if (animating) return;
+  animatedStep(() => {
+    updateStatus();
+  });
+};
+
+btnPlay.onclick = () => {
+  if (finished || !current || !target) return;
+  if (playing) {
+    stopPlaying();
+    draw();
+    return;
+  }
+  playing = true;
+  btnPlay.innerHTML = '&#10074;&#10074; Pausar';
+  statusEl.className = 'status-bar running';
+
+  function playLoop() {
+    if (!playing || finished) {
+      stopPlaying();
+      updateStatus();
+      draw();
+      return;
+    }
+    animatedStep(() => {
+      updateStatus();
+      if (playing && !finished) {
+        const pause = Math.max(20, 300 - parseInt(slSpeed.value) * 15);
+        playTimer = setTimeout(playLoop, pause);
+      } else {
+        stopPlaying();
+        updateStatus();
+        draw();
+      }
+    });
+  }
+  playLoop();
+};
+
+btnReset.onclick = resetAlgorithm;
+
+// Click on canvas to set source/target
+let clickMode = 0;
+
+canvas.onclick = (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  const pos = gridPosFromPixel(px, py);
+  if (!pos || animating || playing) return;
+
+  if (clickMode === 0 || clickMode === 2) {
+    // Set new source
+    source = pos;
+    current = [...source];
+    path = [[...source]];
+    stepCount = 0;
+    finished = false;
+    lastLinkType = '—';
+    contactHistory = [];
+    target = null;
+    clickMode = 1;
+    statusEl.textContent = `Origen s=(${pos[1]+1},${pos[0]+1}). Click en el destino t.`;
+    statusEl.className = 'status-bar idle';
+    draw();
+  } else if (clickMode === 1) {
+    if (pos[0] === source[0] && pos[1] === source[1]) return;
+    target = pos;
+    clickMode = 2;
+    const d0 = latticeDistance(source, target);
+    statusEl.textContent = `s=(${source[1]+1},${source[0]+1}), t=(${target[1]+1},${target[0]+1}), d=${d0}. Listo.`;
+    statusEl.className = 'status-bar idle';
+    draw();
+  }
+};
+
+// --- Init ---
+newNetwork();
+</script>
+</body>
+</html>
