@@ -172,7 +172,7 @@
 <body>
 
 <h1>Kleinberg's Greedy Decentralized Algorithm</h1>
-<p class="subtitle">The Small-World Phenomenon: An Algorithmic Perspective (Kleinberg, 1999)</p>
+<p class="subtitle">Kleinberg (1999, &rho;=0) &rarr; Manku&ndash;Naor&ndash;Wieder (2004, &rho;=1) &middot; ruteo con lookahead probabil&iacute;stico</p>
 
 <div class="main-layout">
   <div class="canvas-wrap">
@@ -201,6 +201,11 @@
         <label>r (exponente)</label>
         <input type="range" id="sl-r" min="0" max="50" value="20" step="1">
         <span class="val" id="val-r">2.0</span>
+      </div>
+      <div class="param-row">
+        <label>&rho; lookahead</label>
+        <input type="range" id="sl-rho" min="0" max="100" value="0" step="5">
+        <span class="val" id="val-rho">0.00</span>
       </div>
       <div class="param-row">
         <label>Velocidad</label>
@@ -241,8 +246,9 @@
         </div>
       </div>
       <p class="info-text">
-        Algoritmo greedy (Thm 2): en cada paso, el nodo actual reenv&iacute;a el mensaje
-        al contacto (local o de largo alcance) m&aacute;s cercano al destino t en distancia Manhattan.
+        Ruteo descentralizado con lookahead &rho;: con prob. &rho; el nodo conoce los contactos de
+        cada vecino y aprovecha el mejor atajo (2 saltos). &rho;=0 = greedy de Kleinberg (Thm 2);
+        &rho;=1 = NoN-greedy de Manku&ndash;Naor&ndash;Wieder (2004).
       </p>
     </div>
 
@@ -252,9 +258,9 @@
         <span class="legend-dot" style="background:#2a7abf"></span> Origen s<br>
         <span class="legend-dot" style="background:#d63031"></span> Destino t<br>
         <span class="legend-dot" style="background:#2f4c6d"></span> Nodo actual u<br>
-        <span class="legend-dot" style="background:#fdcb6e;border:1.5px solid #e17055"></span> Camino recorrido<br>
-        <span class="legend-dot" style="background:rgba(0,0,0,0.12)"></span> Contactos locales (dist &le; p)<br>
-        <span class="legend-dot" style="background:#e17055"></span> Contactos largo alcance<br>
+        <span class="legend-dot" style="background:#2a7abf"></span> Camino: salto local<br>
+        <span class="legend-dot" style="background:#8e44ad"></span> Camino: contacto largo greedy (sin usar info)<br>
+        <span class="legend-dot" style="background:#e17055"></span> Camino: salto por lookahead (info de vecino)<br>
         <span class="legend-dot" style="background:rgba(100,120,140,0.15)"></span> Caminos no tomados (se desvanecen)<br>
       </div>
     </div>
@@ -270,12 +276,14 @@ const slP = document.getElementById('sl-p');
 const slQ = document.getElementById('sl-q');
 const slR = document.getElementById('sl-r');
 const slSpeed = document.getElementById('sl-speed');
+const slRho = document.getElementById('sl-rho');
 
 const valN = document.getElementById('val-n');
 const valP = document.getElementById('val-p');
 const valQ = document.getElementById('val-q');
 const valR = document.getElementById('val-r');
 const valSpeed = document.getElementById('val-speed');
+const valRho = document.getElementById('val-rho');
 
 const btnGen = document.getElementById('btn-gen');
 const btnPlay = document.getElementById('btn-play');
@@ -289,7 +297,7 @@ const stPhase = document.getElementById('st-phase');
 const stType = document.getElementById('st-type');
 
 // --- State ---
-let N, P, Q, R;
+let N, P, Q, R, RHO;
 let longRangeContacts = {};
 let source = null, target = null;
 let current = null;
@@ -316,6 +324,7 @@ function getParams() {
   P = parseInt(slP.value);
   Q = parseInt(slQ.value);
   R = parseFloat(slR.value) / 10;
+  RHO = parseInt(slRho.value) / 100;
 }
 
 function latticeDistance(a, b) {
@@ -374,55 +383,65 @@ function getLocalContacts(i, j) {
 }
 
 // --- Greedy step (paper: choose contact closest to t in lattice distance) ---
-function greedyStep() {
-  if (finished || !current || !target) return null;
-
+// NoN-greedy con lookahead probabilistico (planifica 1 o 2 saltos, sin mutar estado).
+//   rho=0 -> greedy de Kleinberg (Thm 2) ; rho=1 -> Manku-Naor-Wieder (NoN completo).
+// Por cada vecino, con probabilidad rho se "revela" su contacto largo (lookahead).
+// Si el mejor 2-saltos mejora a todo lo directo, se avanza al vecino y se COMPROMETE
+// su contacto (2 saltos) -> garantiza que la distancia decrece (termina siempre).
+function planStep() {
+  if (finished || !current || !target) return [];
   const ci = current[0], cj = current[1];
   const local = getLocalContacts(ci, cj);
   const lr = longRangeContacts[ci + ',' + cj] || [];
+  const contacts = [];
+  for (const c of local) contacts.push({ node: c, type: 'local' });
+  for (const c of lr) contacts.push({ node: c, type: 'lr' });
 
-  let bestDist = Infinity;
-  let bestNode = null;
-  let bestType = 'local';
+  const d_u = latticeDistance(current, target);
 
-  for (const c of local) {
-    const d = latticeDistance(c, target);
-    if (d < bestDist) { bestDist = d; bestNode = c; bestType = 'local'; }
+  // mejor contacto DIRECTO
+  let bDir = null, bDirD = Infinity, bDirType = 'local';
+  for (const c of contacts) {
+    const d = latticeDistance(c.node, target);
+    if (d < bDirD) { bDirD = d; bDir = c.node; bDirType = (c.type === 'lr') ? 'largo alcance' : 'local'; }
   }
-  for (const c of lr) {
-    const d = latticeDistance(c, target);
-    if (d < bestDist) { bestDist = d; bestNode = c; bestType = 'largo alcance'; }
+  if (!bDir) return [];
+
+  // mejor 2-saltos NoN (contacto largo de un vecino, revelado con prob. rho)
+  let bW = null, bWd = Infinity, bVia = null;
+  for (const c of contacts) {
+    if (Math.random() < RHO) {
+      const wl = longRangeContacts[c.node[0] + ',' + c.node[1]] || [];
+      for (const w of wl) {
+        const d = latticeDistance(w, target);
+        if (d < bWd) { bWd = d; bW = w; bVia = c.node; }
+      }
+    }
   }
 
-  if (!bestNode) return null;
+  if (bW !== null && bWd < bDirD && bWd < d_u) {
+    const moves = [{ from: [...current], to: [...bVia], type: 'lookahead' }];
+    if (!(bVia[0] === target[0] && bVia[1] === target[1]))
+      moves.push({ from: [...bVia], to: [...bW], type: 'lookahead' });
+    return moves;
+  }
+  return [{ from: [...current], to: [...bDir], type: bDirType }];
+}
 
-  // Record all contacts considered (for ghost trail)
+function applyMove(mv) {
+  // ghost trail: contactos considerados desde el nodo de origen
+  const local = getLocalContacts(mv.from[0], mv.from[1]);
+  const lr = longRangeContacts[mv.from[0] + ',' + mv.from[1]] || [];
   const allContacts = [];
-  for (const c of local) {
-    allContacts.push({ node: [...c], type: 'local' });
-  }
-  for (const c of lr) {
-    allContacts.push({ node: [...c], type: 'lr' });
-  }
+  for (const c of local) allContacts.push({ node: [...c], type: 'local' });
+  for (const c of lr) allContacts.push({ node: [...c], type: 'lr' });
 
-  const from = [...current];
-  current = bestNode;
+  current = [...mv.to];
   path.push([...current]);
   stepCount++;
-  lastLinkType = bestType;
-
-  contactHistory.push({
-    step: stepCount,
-    from: from,
-    contacts: allContacts,
-    chosen: [...current],
-  });
-
-  if (current[0] === target[0] && current[1] === target[1]) {
-    finished = true;
-  }
-
-  return { from, to: [...current], type: bestType };
+  lastLinkType = mv.type;
+  contactHistory.push({ step: stepCount, from: mv.from, contacts: allContacts, chosen: [...current], type: mv.type });
+  if (current[0] === target[0] && current[1] === target[1]) finished = true;
 }
 
 // --- Drawing ---
@@ -584,50 +603,32 @@ function draw() {
     }
   }
 
-  // Draw path (thick golden trail)
-  if (path.length > 1) {
-    // Glow
+  // Draw path: cada segmento coloreado por el TIPO de salto (esquema de la Fig. 1)
+  //   local = azul · contacto largo greedy = morado · lookahead = naranja
+  const SEGCOL = { 'local': '#2A7ABF', 'largo alcance': '#8E44AD', 'lookahead': '#E17055' };
+  for (let h = 0; h < contactHistory.length; h++) {
+    const e = contactHistory[h];
+    const col = SEGCOL[e.type] || '#fdcb6e';
+    const [fx, fy] = nodePos(e.from[0], e.from[1]);
+    const [px, py] = nodePos(e.chosen[0], e.chosen[1]);
+    let ex = px, ey = py;
+    if (animating && h === contactHistory.length - 1 && animFrom && animTo) {
+      const t = easeInOutCubic(animProgress);
+      ex = lerp(fx, px, t); ey = lerp(fy, py, t);
+    }
+    // glow
     ctx.save();
-    ctx.strokeStyle = 'rgba(253,203,110,0.3)';
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = col;
     ctx.lineWidth = Math.max(6, cs * 0.28);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    const [sx0, sy0] = nodePos(path[0][0], path[0][1]);
-    ctx.moveTo(sx0, sy0);
-    for (let k = 1; k < path.length; k++) {
-      const [px, py] = nodePos(path[k][0], path[k][1]);
-      // If animating the last segment, only draw up to animated position
-      if (animating && k === path.length - 1 && animFrom && animTo) {
-        const [fx, fy] = nodePos(animFrom[0], animFrom[1]);
-        const t = easeInOutCubic(animProgress);
-        ctx.lineTo(lerp(fx, px, t), lerp(fy, py, t));
-      } else {
-        ctx.lineTo(px, py);
-      }
-    }
-    ctx.stroke();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(ex, ey); ctx.stroke();
     ctx.restore();
-
-    // Solid line
-    ctx.strokeStyle = '#fdcb6e';
-    ctx.lineWidth = Math.max(2.5, cs * 0.1);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    const [sx, sy] = nodePos(path[0][0], path[0][1]);
-    ctx.moveTo(sx, sy);
-    for (let k = 1; k < path.length; k++) {
-      const [px, py] = nodePos(path[k][0], path[k][1]);
-      if (animating && k === path.length - 1 && animFrom && animTo) {
-        const [fx, fy] = nodePos(animFrom[0], animFrom[1]);
-        const t = easeInOutCubic(animProgress);
-        ctx.lineTo(lerp(fx, px, t), lerp(fy, py, t));
-      } else {
-        ctx.lineTo(px, py);
-      }
-    }
-    ctx.stroke();
+    // línea sólida
+    ctx.strokeStyle = col;
+    ctx.lineWidth = Math.max(2.6, cs * 0.12);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(ex, ey); ctx.stroke();
   }
 
   // Draw all nodes
@@ -641,15 +642,15 @@ function draw() {
     }
   }
 
-  // Draw visited nodes
+  // Draw visited nodes (waypoints neutros, para no competir con el color del segmento)
   for (let k = 0; k < path.length; k++) {
     if (animating && k === path.length - 1) continue; // animated node drawn separately
     const [x, y] = nodePos(path[k][0], path[k][1]);
     ctx.beginPath();
-    ctx.arc(x, y, nodeR + 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#fdcb6e';
+    ctx.arc(x, y, nodeR, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = '#e17055';
+    ctx.strokeStyle = '#9aacbf';
     ctx.lineWidth = 1.2;
     ctx.stroke();
   }
@@ -746,33 +747,31 @@ function draw() {
 
 // --- Animated step ---
 function animatedStep(callback) {
-  const result = greedyStep();
-  if (!result) { if (callback) callback(); return; }
-
-  animating = true;
-  animFrom = result.from;
-  animTo = result.to;
-  animProgress = 0;
-  animLinkType = result.type;
-
-  const duration = Math.max(80, 400 - parseInt(slSpeed.value) * 18);
-  const startTime = performance.now();
-
-  function tick(now) {
-    const elapsed = now - startTime;
-    animProgress = Math.min(1, elapsed / duration);
-    draw();
-    if (animProgress < 1) {
-      animRAF = requestAnimationFrame(tick);
-    } else {
-      animating = false;
-      animFrom = null;
-      animTo = null;
+  const plan = planStep();
+  if (!plan || plan.length === 0) { if (callback) callback(); return; }
+  let idx = 0;
+  function one() {
+    const mv = plan[idx];
+    applyMove(mv);                         // aplica el salto al estado (path tiene 'to' al final)
+    animating = true;
+    animFrom = mv.from; animTo = mv.to; animProgress = 0; animLinkType = mv.type;
+    const duration = Math.max(80, 400 - parseInt(slSpeed.value) * 18);
+    const startTime = performance.now();
+    function tick(now) {
+      animProgress = Math.min(1, (now - startTime) / duration);
       draw();
-      if (callback) callback();
+      if (animProgress < 1) {
+        animRAF = requestAnimationFrame(tick);
+      } else {
+        animating = false; animFrom = null; animTo = null; draw();
+        idx++;
+        if (idx < plan.length && !finished) { one(); }
+        else if (callback) { callback(); }
+      }
     }
+    animRAF = requestAnimationFrame(tick);
   }
-  animRAF = requestAnimationFrame(tick);
+  one();
 }
 
 // --- Controls ---
@@ -839,7 +838,7 @@ function newNetwork() {
   contactHistory = [];
 
   const d0 = latticeDistance(source, target);
-  statusEl.textContent = `Red generada (n=${N}, p=${P}, q=${Q}, r=${R.toFixed(1)}). d(s,t)=${d0}. Listo.`;
+  statusEl.textContent = `Red generada (n=${N}, p=${P}, q=${Q}, r=${R.toFixed(1)}, \u03c1=${RHO.toFixed(2)}). d(s,t)=${d0}. Listo.`;
   statusEl.className = 'status-bar idle';
   draw();
 }
@@ -849,6 +848,7 @@ slP.oninput = () => { valP.textContent = slP.value; };
 slQ.oninput = () => { valQ.textContent = slQ.value; };
 slR.oninput = () => { valR.textContent = (parseFloat(slR.value) / 10).toFixed(1); };
 slSpeed.oninput = () => { valSpeed.textContent = slSpeed.value; };
+slRho.oninput = () => { RHO = parseInt(slRho.value) / 100; valRho.textContent = RHO.toFixed(2); };
 
 btnGen.onclick = newNetwork;
 
